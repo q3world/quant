@@ -495,5 +495,5 @@ if __name__ == '__main__':
     #print(quote_PyTdx().get_symbols())
     #print(quote_PyTdx().get_candle('000001.0', '1d'))
     
-    market.run_target()
-    #market.run()
+    #market.run_target()
+    market.run()
