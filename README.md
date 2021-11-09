@@ -17,6 +17,11 @@ quant.png
 
 ## log
 
+### 2021/11/9
+
+增加数据源 pytdx （约定数据源）
+（akshare 比较慢，pytdx 快n多）
+
 ### 2021/11/6
 
 quant 运行后，直接启动一个线程循环执行；
@@ -32,3 +37,4 @@ quant 运行后，直接启动一个线程循环执行；
 ## ref
 
 akshare： https://github.com/akfamily/akshare
+pytdx： https://github.com/rainx/pytdx
