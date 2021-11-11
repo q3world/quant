@@ -10,6 +10,8 @@ import talib as ta
 import winsound
 import threading
 
+import mplfinance as mpf
+
 #import trading_calendars as tcal
 #import pandas_market_calendars as mcal
 import cn_stock_holidays.data as ccal
@@ -249,25 +251,34 @@ class strategy_base:
 class strategy_MA(strategy_base):
     def execute(self, symbol, cache):
         def df_compute(symbol, interval, df):
-            c_values = df['close'].values
-            price = c_values[-1]
+            param = [5, 10, 20, 30, 60, 120, 240]
+
             l_values = df['low'].values
+            c_values = df['close'].values
+            c = len(c_values)
+            
+            k = -1
+            dt = df.index[k]
+            price = c_values[k]
             
             vs = []
-            time_period_list = [5, 10, 20, 30, 60, 120, 240]
-            for time_period in time_period_list:
-                if time_period < len(df):
+            for time_period in param:
+                if time_period < c:
                     ma = ta.MA(c_values, timeperiod=time_period, matype=0)
-                    value = ma[-1]
-                    if price > value and price < value*1.01 and ma[-1] > ma[-2] and ma[-2] > ma[-3]:
+                    value = ma[k]
+                    if price > value and price < value*1.01 and ma[k] > ma[k-1] and ma[k-1] > ma[k-2]:
                         flag = 0
-                        for i in range(time_period//3 + 1):
-                            if l_values[-i] > ma[-i]:
+                        for i in range(k, k - time_period//2):
+                            if l_values[i] > ma[i]:
                                 flag = 1
                                 break
 
                         if not flag:
-                            vs.append({'symbol': symbol, 'interval': interval, 'function': f'ma{time_period}', 'price': price, 'value': np.around(value, digits)})
+                            diff = np.around(price - value, digits)
+                            pt = np.around((price / value - 1) * 100, 2)
+                            value = np.around(value, digits)
+                            v = '{:>8.2f} {:>8.2f} {:>8.2f}%'.format(value, diff, pt)
+                            vs.append({'time': dt, 'symbol': symbol, 'interval': interval, 'function': f'ma{time_period}', 'price': price, 'v': v})
 
             return vs
 
@@ -286,17 +297,85 @@ class strategy_MACD(strategy_base):
         def df_compute(symbol, interval, df):
             param = (12, 26, 9)
             
+            h_values = df['high'].values
+            l_values = df['low'].values
             c_values = df['close'].values
-            price = c_values[-1]
+            c = len(c_values)
+            
+            k = -1
+            dt = df.index[k]
+            price = c_values[k]
             
             vs = []
             macd = ta.MACD(c_values, fastperiod=param[0], slowperiod=param[1], signalperiod=param[2])
-            print(macd)
+            #print(macd)
+
+            hist = macd[2]
+            #for k in range(k, -c, -1):
+            if 1:
+                #print(symbol, interval, k)
+                if k>-c and hist[k]>0 and hist[k-1]<0:
+                    vsz = []
+                    flag = False
+                    i = k
+                    while i > -c:
+                        if (flag and hist[i]>0 and hist[i-1]<0) or (not flag and hist[i]<0 and hist[i-1]>0):
+                            flag = not flag
+                            vsz.append(i)
+
+                        if len(vsz)>2:
+                            break
+                
+                        i -= 1
+
+                    #print(symbol, interval, k, df.index[k], vsz)
+                    if len(vsz)>2:
+                        if hist[k]>0 and hist[k-1]<0:
+                            vx0 = min(macd[0][vsz[0]:k])
+                            vx1 = min(macd[0][vsz[2]:vsz[1]])
+                            vy0 = min(l_values[vsz[0]:k])
+                            vy1 = min(l_values[vsz[2]:vsz[1]])
+                            #vy = max(h_values[vsz[1]:vsz[0]])
+
+                            #print(vx0, vx1, vy0, vy1)
+
+                            if vx0>vx1 and vy0<vy1:
+                                vs.append({'time': dt, 'symbol': symbol, 'interval': interval, 'function': f'macd-pd', 'price': price})
+                                #print(vs)
+
+            if 1:
+                #print(symbol, interval, k)
+                if k>-c and hist[k]<0 and hist[k-1]>0:
+                    vsz = []
+                    flag = False
+                    i = k
+                    while i > -c:
+                        if (flag and hist[i]<0 and hist[i-1]>0) or (not flag and hist[i]>0 and hist[i-1]<0):
+                            flag = not flag
+                            vsz.append(i)
+
+                        if len(vsz)>2:
+                            break
+                
+                        i -= 1
+
+                    #print(symbol, interval, k, df.index[k], vsz)
+                    if len(vsz)>2:
+                        if hist[k]<0 and hist[k-1]>0:
+                            vx0 = max(macd[0][vsz[0]:k])
+                            vx1 = max(macd[0][vsz[2]:vsz[1]])
+                            vy0 = max(h_values[vsz[0]:k])
+                            vy1 = max(h_values[vsz[2]:vsz[1]])
+                            #vy = mix(l_values[vsz[1]:vsz[0]])
+
+                            #print(vx0, vx1, vy0, vy1)
+
+                            if vx0<vx1 and vy0>vy1:
+                                vs.append({'time': dt, 'symbol': symbol, 'interval': interval, 'function': f'macd-nd', 'price': price})
+                                #print(vs)
 
             return vs
 
-        digits = market.get_quote(symbol).get_digits(symbol)
-        
         vs = []
         for i in cache:
             v = df_compute(symbol, i, cache[i])
@@ -312,7 +391,7 @@ class market:
     _selection = {}
     _symbols = {}
     _quotes = {}
-    _strategies = {}        
+    _strategies = {}
     
     def read_config():
         print('read_config')
@@ -421,7 +500,7 @@ class market:
         
     def get_strategy():
         vs = ['MA', 'MACD']
-        vs = ['MA']
+        #vs = ['MA']
         for v in vs:
             if not v in market._strategies:
                 market._strategies[v] = getattr(sys.modules[__name__], f'strategy_{v}')()
@@ -456,16 +535,45 @@ class market:
                             title = market._selection[symbol]['title']
                             
                             for v in root:
-                                diff = np.around(v['price'] - v['value'], digits)
-                                pt = np.around((v['price'] / v['value'] - 1) * 100, 2)
-                                print('{} {:<5} {:>10.3f} {:>3} {:<5} {:>8.3f} {:>8.3f} {:>8.3f}%'.format(v['symbol'], title, v['price'], v['interval'], v['function'], v['value'], diff, pt))
+                                print('{:<10} {:<10} {:>10.3f} {:>3} {:<10} {} {}'.format(v['symbol'], title, v['price'], v['interval'], v['function'], v['v'] if 'v' in v else '', v['time']))
                             
                             winsound.PlaySound('*', winsound.SND_ALIAS)
 
             result = result or flag
+            #break
 
         return result
 
+    def show_mpf(df):
+        vma5 = df['volume'].rolling(5).mean()
+        vma10 = df['volume'].rolling(10).mean()
+        
+        exp12 = df['close'].ewm(span=12, adjust=False).mean()
+        exp26 = df['close'].ewm(span=26, adjust=False).mean()
+        macd = exp12 - exp26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        histogram = macd - signal
+        histogram[histogram < 0] = None  
+        histogram_positive = histogram
+        histogram = macd - signal  
+        histogram[histogram >= 0] = None  
+        histogram_negative = histogram
+        print(macd, signal, histogram)
+        add_plot = [
+            mpf.make_addplot(vma5, panel=1, color='fuchsia', secondary_y='auto'),
+            mpf.make_addplot(vma10, panel=1, color='b', secondary_y='auto'),
+
+            #mpf.make_addplot(exp12, type='line', color='y'),
+            #mpf.make_addplot(exp26, type='line', color='r'),
+            #mpf.make_addplot(histogram, type='bar', width=0.7, panel=2, color='dimgray', alpha=1, secondary_y=False),
+            mpf.make_addplot(histogram_positive, type='bar', width=0.7, panel=2, color=(.5, 1, .5)),
+            mpf.make_addplot(histogram_negative, type='bar', width=0.7, panel=2, color=(1, .5, .5)),
+            mpf.make_addplot(macd, panel=2, color='fuchsia', secondary_y=True),
+            mpf.make_addplot(signal, panel=2, color='b', secondary_y=True),
+        ]
+        
+        mpf.plot(df, type='candle', mav=(5, 10, 20, 30, 60, 120, 240), volume=True, addplot=add_plot, )
+        
     def write_cache(cache):
         for symbol in cache:
             for interval in cache[symbol]:
@@ -494,6 +602,6 @@ class market:
 if __name__ == '__main__':
     #print(quote_PyTdx().get_symbols())
     #print(quote_PyTdx().get_candle('000001.0', '1d'))
-    
+    #market.show_mpf(quote_PyTdx().get_candle('000001.0', '1d'))
     #market.run_target()
     market.run()
