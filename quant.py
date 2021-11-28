@@ -4,11 +4,17 @@ import time
 import datetime
 import requests
 import json
+import hashlib
 import numpy as np
 import pandas as pd
 import talib as ta
+
 import winsound
+
 import threading
+
+import asyncio
+import websockets
 
 import mplfinance as mpf
 
@@ -16,7 +22,7 @@ import mplfinance as mpf
 #import pandas_market_calendars as mcal
 import cn_stock_holidays.data as ccal
 
-import akshare
+#import akshare
 from pytdx.hq import TdxHq_API
 from pytdx.config.hosts import hq_hosts
 
@@ -129,7 +135,7 @@ class quote_china(quote_base):
             
             ohlcv = { 'open': 'first', 'close': 'last', 'high': 'max', 'low': 'min',  'volume': 'sum' }
             return df.resample(rule, closed='right', label='right').agg(ohlcv).dropna()
-
+'''
 class quote_AkShare(quote_china):
     _real = { '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '1d': 'daily', '1w': 'weekly', '1M': 'monthly' }
     _decl = {
@@ -175,7 +181,7 @@ class quote_AkShare(quote_china):
             
         else:
             return self.get_candle(symbol, self.get_first(), 1)
-            
+'''
 class quote_PyTdx(quote_china):
     _real = { '1m': 8, '5m': 0, '15m': 1, '30m': 2, '1h': 3, '1d': 4, '1w': 5, '1M': 6, '1q': 10, '1y': 11 }
     _decl = {
@@ -258,8 +264,8 @@ class strategy_MA(strategy_base):
             c = len(c_values)
             
             k = -1
-            dt = df.index[k]
-            price = c_values[k]
+            dt = df.index[k].strftime('%Y-%m-%d %H:%M:%S')
+            price = l_values[k]
             
             vs = []
             for time_period in param:
@@ -278,7 +284,7 @@ class strategy_MA(strategy_base):
                             pt = np.around((price / value - 1) * 100, 2)
                             value = np.around(value, digits)
                             v = '{:>8.2f} {:>8.2f} {:>8.2f}%'.format(value, diff, pt)
-                            vs.append({'time': dt, 'symbol': symbol, 'interval': interval, 'function': f'ma{time_period}', 'price': price, 'v': v})
+                            vs.append({'time': dt, 'interval': interval, 'function': f'ma{time_period}', 'price': price, 'value': v})
 
             return vs
 
@@ -303,7 +309,7 @@ class strategy_MACD(strategy_base):
             c = len(c_values)
             
             k = -1
-            dt = df.index[k]
+            dt = df.index[k].strftime('%Y-%m-%d %H:%M:%S')
             price = c_values[k]
             
             vs = []
@@ -340,7 +346,7 @@ class strategy_MACD(strategy_base):
                             #print(vx0, vx1, vy0, vy1)
 
                             if vx0>vx1 and vy0<vy1:
-                                vs.append({'time': dt, 'symbol': symbol, 'interval': interval, 'function': f'macd-pd', 'price': price})
+                                vs.append({'time': dt, 'interval': interval, 'function': f'macd-pd', 'price': price})
                                 #print(vs)
 
             if 1:
@@ -371,7 +377,7 @@ class strategy_MACD(strategy_base):
                             #print(vx0, vx1, vy0, vy1)
 
                             if vx0<vx1 and vy0>vy1:
-                                vs.append({'time': dt, 'symbol': symbol, 'interval': interval, 'function': f'macd-nd', 'price': price})
+                                vs.append({'time': dt, 'interval': interval, 'function': f'macd-nd', 'price': price})
                                 #print(vs)
 
             return vs
@@ -384,6 +390,43 @@ class strategy_MACD(strategy_base):
         
         return vs
     
+class web_Client:
+    _url = None
+    _greet = None
+    _callback = None
+    _websocket = None
+    def __init__(self, url=f'ws://localhost:5050', greet=None, callback=None):
+        self._url = url
+        self._greet = greet
+        self._callback = callback
+
+    def run(self):
+        asyncio.run(self.open())
+
+    def recv(self):
+        asyncio.run(self.recv_msg())
+
+    def send(self, msg):
+        asyncio.run(self.send_msg(msg))
+        
+    async def open(self):
+        async with websockets.connect(self._url) as websocket:
+            self._websocket = websocket
+            if self._greet:
+                await self.send_msg(self._greet)
+                
+            while True:
+                await self.recv_msg()
+
+    async def recv_msg(self):
+        msg = await self._websocket.recv()
+        print(f"{msg}")
+        if self._callback:
+            self._callback(msg)
+
+    async def send_msg(self, msg):
+        await self._websocket.send(msg)
+        
 class market:
     _running = False
     _filename = 'quant.cfg'
@@ -392,6 +435,8 @@ class market:
     _symbols = {}
     _quotes = {}
     _strategies = {}
+    _unique = []
+    _checksum = ''
     
     def read_config():
         print('read_config')
@@ -499,8 +544,8 @@ class market:
         #print(cache)
         
     def get_strategy():
-        vs = ['MA', 'MACD']
-        #vs = ['MA']
+        #vs = ['MA', 'MACD']
+        vs = ['MA']
         for v in vs:
             if not v in market._strategies:
                 market._strategies[v] = getattr(sys.modules[__name__], f'strategy_{v}')()
@@ -515,6 +560,10 @@ class market:
         for symbol in market._selection:
             #print(symbol)
             
+            if not 'title' in market._selection[symbol]:
+                _symbols = market.get_symbols(symbol)
+                market._selection[symbol]['title'] = _symbols[symbol]
+                                
             quote = market.get_quote(symbol)
             digits = quote.get_digits(symbol)
             flag = quote.during(force)
@@ -527,17 +576,23 @@ class market:
                     strategies = market.get_strategy()
                     for strategy in strategies:
                         root = strategies[strategy].execute(symbol, cache[symbol])
-                        if root:
-                            if not 'title' in market._selection[symbol]:
-                                _symbols = market.get_symbols(symbol)
-                                market._selection[symbol]['title'] = _symbols[symbol]
+                        vs = []
+                        for v in root:
+                            u = symbol + v['interval'] + v['function'] + v['time']
+                            u = hashlib.md5(u.encode()).hexdigest()
+                            if not u in market._unique:
+                                vs.append(v)
+                                market._unique.append(u)
                                 
+                        if vs:
                             title = market._selection[symbol]['title']
+                            if 'url' in market._config and market._config['url']:
+                                market.web_client.send(json.dumps({'symbol': symbol, 'title': title, 'data': vs}))
+                            else:
+                                for v in vs:
+                                    print('{:<10} {:<10} {:>10.3f} {:>3} {:<10} {} {}'.format(symbol, title, v['price'], v['interval'], v['function'], v['v'] if 'v' in v else '', v['time']))
                             
-                            for v in root:
-                                print('{:<10} {:<10} {:>10.3f} {:>3} {:<10} {} {}'.format(v['symbol'], title, v['price'], v['interval'], v['function'], v['v'] if 'v' in v else '', v['time']))
-                            
-                            winsound.PlaySound('*', winsound.SND_ALIAS)
+                                winsound.PlaySound('*', winsound.SND_ALIAS)
 
             result = result or flag
             #break
@@ -584,6 +639,8 @@ class market:
         market.load_config()
         cache = {}
         
+        threading.Thread(target=market.run_client).start()
+
         market.run_single(cache, 1)
         #market.write_cache(cache)
         
@@ -599,9 +656,17 @@ class market:
             market._running = True
             threading.Thread(target=market.run_target).start()
             
+    def run_client():
+        market.web_client = web_Client(url=f'ws://localhost:5050', greet=json.dumps({'key': '1'}), callback=market.client_callback)
+        market.web_client.run()
+        
+    def client_callback(data):
+        print(data)
+        
 if __name__ == '__main__':
     #print(quote_PyTdx().get_symbols())
     #print(quote_PyTdx().get_candle('000001.0', '1d'))
     #market.show_mpf(quote_PyTdx().get_candle('000001.0', '1d'))
+    #web_client.run()
     #market.run_target()
     market.run()

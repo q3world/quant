@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<html>
+<head>
+<style>
+#status{
+}
+.connected{
+	color: green;
+	background: lime;
+}
+#log{
+	width: 50rem;
+	overflow: auto;
+}
+#log>div>span{
+	display: inline-block;
+	margin-right: 0.5rem;
+}
+#log>div>span:nth-child(1){
+	width: 5rem;
+}
+#log>div>span:nth-child(2){
+	width: 5rem;
+}
+#log>div>span:nth-child(3){
+	width: 5rem;
+	text-align: right;
+}
+#log>div>span:nth-child(4){
+	width: 5rem;
+	text-align: right;
+}
+#log>div>span:nth-child(5){
+	width: 5rem;
+}
+#log>div>span:nth-child(6){
+	width: 10rem;
+}
+</style>
+</head>
+<body>
+<h3>Quant <span id="status">C</span></h3>
+<hr/>
+<div id="log"></div>
+
+<script language="javascript" type="text/javascript">
+	var conn = null;
+	var maxLength = 100;
+	function log(msg) {
+		var control = document.querySelector('#log');
+		control.insertBefore(document.createElement('div'), control.firstElementChild).innerHTML = msg;
+		if(control.children.length > maxLength){
+			control.lastElementChild.remove();
+		}
+	}
+	function connect() {
+		disconnect();
+		var wsUri = (window.location.protocol=='https:'&&'wss://'||'ws://') + window.location.host;
+		conn = new WebSocket(wsUri);
+		//log('Connecting...');
+		conn.onopen = function() {
+			//log('Connected.');
+			update_ui();
+			conn.send(JSON.stringify({pid: 0}));
+		};
+		conn.onmessage = function(e) {
+			console.log(e.data)
+			//log('Received: ' + e.data);
+			try{
+				handle(JSON.parse(e.data));
+			}catch{}
+		};
+		conn.onclose = function() {
+			//log('Disconnected.');
+			update_ui();
+		};
+	}
+	function disconnect() {
+		if (conn&&conn.readyState!=3) {
+			//log('Disconnecting...');
+			conn.close();
+			update_ui();
+		}
+	}
+	function handle(data) {
+		var v = data['data'];
+		for(var i in v){
+			handle_row(data['symbol'], data['title'], v[i]);
+		}
+	}
+	function handle_row(symbol, title, row) {
+		var d = new Date();
+		var s = '';
+		s += '<span>' + symbol + '</span>';
+		s += '<span>' + title + '</span>';
+		s += '<span>' + row['price'].toFixed(2) + '</span>';
+		s += '<span>' + row['interval'] + '</span>';
+		s += '<span>' + row['function'] + '</span>';
+		s += '<span>' + (row.hasOwnProperty('value')? row['value']: '') + '</span>';
+		s += '<span>' + d.toLocaleString('zh', {month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", hour12: false}) + '</span>';
+		log(s);
+	}
+	function update_ui() {
+		document.querySelector('#status').classList.toggle('connected', conn&&conn.readyState==1? 1: 0);
+	}
+
+	function auto_run() {
+		if (!conn||conn.readyState==3) {
+			connect();
+		}
+
+		setTimeout("auto_run()", 30000);
+	}
+	auto_run();
+
+</script>
+</body>
+</html>
