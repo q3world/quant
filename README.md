@@ -6,16 +6,22 @@
 
 ## run
 
-0. 配置 quant.cfg
+### 0. 配置 quant.cfg
+
 0.1 如果配置了 "url"，系统将按分布模式执行，即将结果传到服务端，如果没配置 "url"，则按独立模式执行
+
 0.2 配置 "selection"，设定选择的代码（"000001.0"，尾缀代表市场：0 为深市；1 为沪市）
 
-1. 分布模式
+### 1. 分布模式
+
 1.1 先运行 python quant_srv.py，以启动服务端程序
+
 1.2 在浏览器打开 http://localhost:5050/
+
 1.3 运行 python quant.py 启动客户端程序
 
-2. 独立模式
+### 2. 独立模式
+
 2.1 直接运行 python quant.py 启动程序
 
 ## interface
